@@ -1,0 +1,37 @@
+{
+  "name": "ProtectMe SOS",
+  "short_name": "ProtectMe",
+  "description": "Personal Safety App - Emergency SOS, Live Location, Evidence Recording",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#dc2626",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.jpg",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.jpg",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["safety", "utilities", "lifestyle"],
+  "shortcuts": [
+    {
+      "name": "SOS Emergency",
+      "url": "/dashboard?sos=true",
+      "description": "Activate emergency SOS"
+    },
+    {
+      "name": "Walk With Me",
+      "url": "/dashboard/walk-with-me",
+      "description": "Start live journey monitoring"
+    }
+  ]
+}
