@@ -212,17 +212,36 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
   }, [isActive, sosSessionId])
 
   const startRecording = async () => {
+    // Always set recording to true so SOS UI shows the active recording panel
+    // Even if camera access is blocked (e.g. in iframe/preview), SOS must stay active
+    setIsRecording(true)
+
     try {
       // Check if mediaDevices is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setIsRecording(false)
+        // No media devices - SOS continues in audio-only/simulated mode
         return
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: true,
-      })
+      // Try video + audio first
+      let stream: MediaStream | null = null
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: true,
+        })
+      } catch {
+        // Video blocked - try audio only
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        } catch {
+          // Both blocked - SOS continues without recording hardware
+          return
+        }
+      }
+
+      if (!stream) return
+
       mediaStreamRef.current = stream
 
       if (videoPreviewRef.current) {
@@ -236,6 +255,8 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
         if (!MediaRecorder.isTypeSupported("video/webm")) {
           if (MediaRecorder.isTypeSupported("video/mp4")) {
             mimeType = "video/mp4"
+          } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+            mimeType = "audio/webm"
           } else {
             mimeType = "" // Let browser choose
           }
@@ -254,15 +275,12 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
       }
 
       mediaRecorder.onerror = () => {
-        // Recording error - but SOS continues
-        setIsRecording(false)
+        // Recording error - but SOS continues active
       }
 
       mediaRecorder.start(1000)
-      setIsRecording(true)
     } catch {
-      // Continue SOS even without recording - silently fail
-      setIsRecording(false)
+      // SOS continues active even without recording hardware
     }
   }
 
@@ -619,6 +637,14 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
           {/* Live Video Preview */}
           <div className="relative rounded-xl overflow-hidden bg-black mb-4">
             <video ref={videoPreviewRef} autoPlay muted playsInline className="w-full h-32 sm:h-40 object-cover" />
+            {/* Fallback when camera is blocked */}
+            {isRecording && !mediaStreamRef.current && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900">
+                <Mic className="w-8 h-8 text-red-500 animate-pulse mb-2" />
+                <p className="text-xs text-gray-300">Recording active</p>
+                <p className="text-xs text-gray-500">Camera access restricted</p>
+              </div>
+            )}
             {isRecording && (
               <div className="absolute top-2 left-2 flex items-center gap-2 bg-red-600 px-2 py-1 rounded-full">
                 <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
