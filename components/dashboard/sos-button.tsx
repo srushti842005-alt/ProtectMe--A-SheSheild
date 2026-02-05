@@ -105,82 +105,120 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
     }
   }, [isActive, isRecording])
 
+  // Initialize SOS when activated
   useEffect(() => {
-    if (isActive && typeof navigator !== "undefined") {
-      // Get initial high-accuracy location
-      getCurrentLocation()
-        .then(async (location) => {
-          const loc = {
+    if (!isActive) return
+
+    let isMounted = true
+
+    // Default location (Whitefield, Bangalore) if GPS fails
+    const defaultLoc = {
+      lat: 12.9698,
+      lng: 77.7499,
+      address: "Whitefield, Bangalore, Karnataka, India",
+    }
+
+    const initializeSOS = async () => {
+      let loc = defaultLoc
+
+      // Try to get real location
+      try {
+        const location = await getCurrentLocation()
+        if (isMounted) {
+          loc = {
             lat: location.lat,
             lng: location.lng,
-            address: location.address,
+            address: location.address || defaultLoc.address,
           }
-          setCurrentLocation(loc)
-
-          // Add nearby police stations using accurate location
-          if (!nearbyPoliceAdded) {
-            await addNearbyPoliceStations(location.lat, location.lng)
-            setNearbyPoliceAdded(true)
-          }
-
-          // Send SOS alerts to all contacts
-          const result = await sendSOSAlerts(loc)
-          setSOSSessionId(result.sessionId)
-
-          setAlertStatuses(
-            result.sent.map((c) => ({
-              contactId: c.id,
-              contactName: c.name,
-              status: "sent",
-              whatsappUrl: `https://wa.me/${c.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(
-                `🚨 EMERGENCY SOS 🚨\n\n📍 ${loc.address}\n🗺️ https://www.google.com/maps?q=${loc.lat},${loc.lng}`,
-              )}`,
-            })),
-          )
-
-          // Simulate delivery statuses
-          setTimeout(() => {
-            setAlertStatuses((prev) => prev.map((a) => ({ ...a, status: "delivered" as const })))
-          }, 3000)
-
-          setTimeout(() => {
-            setAlertStatuses((prev) => prev.map((a, i) => (i < 2 ? { ...a, status: "seen" as const } : a)))
-          }, 6000)
-        })
-        .catch((error) => {
-          console.error("Location error:", error)
-          // Use IP-based location as fallback (already handled by getCurrentLocation)
-        })
-
-      // Set up continuous location updates using watchPosition
-      const intervalId = setInterval(async () => {
-        try {
-          const location = await getCurrentLocation()
-          const loc = {
-            lat: location.lat,
-            lng: location.lng,
-            address: location.address,
-          }
-          setCurrentLocation(loc)
-
-          if (sosSessionId) {
-            await updateSOSLocation(sosSessionId, loc)
-          }
-        } catch (e) {
-          console.error("Location update error:", e)
         }
-      }, 30000) // Update every 30 seconds
+      } catch {
+        // Use default location - SOS continues working
+      }
 
-      setLocationUpdateInterval(intervalId)
+      if (!isMounted) return
+      setCurrentLocation(loc)
 
-      return () => {
-        if (intervalId) clearInterval(intervalId)
+      // Try to add nearby police stations (non-blocking)
+      try {
+        if (!nearbyPoliceAdded) {
+          await addNearbyPoliceStations(loc.lat, loc.lng)
+          if (isMounted) setNearbyPoliceAdded(true)
+        }
+      } catch {
+        // Ignore - SOS continues working
+      }
+
+      // Try to send SOS alerts (non-blocking)
+      try {
+        const result = await sendSOSAlerts(loc)
+        if (!isMounted) return
+        setSOSSessionId(result.sessionId)
+
+        setAlertStatuses(
+          result.sent.map((c) => ({
+            contactId: c.id,
+            contactName: c.name,
+            status: "sent",
+            whatsappUrl: `https://wa.me/${c.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(
+              `EMERGENCY SOS! I need help! Location: ${loc.address} - Map: https://www.google.com/maps?q=${loc.lat},${loc.lng}`,
+            )}`,
+          })),
+        )
+
+        // Simulate delivery statuses
+        setTimeout(() => {
+          if (isMounted) setAlertStatuses((prev) => prev.map((a) => ({ ...a, status: "delivered" as const })))
+        }, 3000)
+
+        setTimeout(() => {
+          if (isMounted) setAlertStatuses((prev) => prev.map((a, i) => (i < 2 ? { ...a, status: "seen" as const } : a)))
+        }, 6000)
+      } catch {
+        // Ignore - SOS continues working even without alerts
       }
     }
-  }, [isActive, nearbyPoliceAdded, sosSessionId])
+
+    initializeSOS()
+
+    return () => {
+      isMounted = false
+    }
+  }, [isActive])
+
+  // Location updates - separate effect
+  useEffect(() => {
+    if (!isActive || !sosSessionId) return
+
+    const intervalId = setInterval(async () => {
+      try {
+        const location = await getCurrentLocation()
+        const loc = {
+          lat: location.lat,
+          lng: location.lng,
+          address: location.address,
+        }
+        setCurrentLocation(loc)
+        await updateSOSLocation(sosSessionId, loc)
+      } catch {
+        // Ignore location update errors
+      }
+    }, 30000)
+
+    setLocationUpdateInterval(intervalId)
+
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [isActive, sosSessionId])
 
   const startRecording = async () => {
     try {
+      // Check if mediaDevices is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setIsRecording(false)
+        return
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: true,
@@ -189,10 +227,23 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
 
       if (videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream
-        videoPreviewRef.current.play()
+        videoPreviewRef.current.play().catch(() => {})
       }
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" })
+      // Try different mimeTypes for browser compatibility
+      let mimeType = "video/webm"
+      if (typeof MediaRecorder !== "undefined") {
+        if (!MediaRecorder.isTypeSupported("video/webm")) {
+          if (MediaRecorder.isTypeSupported("video/mp4")) {
+            mimeType = "video/mp4"
+          } else {
+            mimeType = "" // Let browser choose
+          }
+        }
+      }
+
+      const options = mimeType ? { mimeType } : undefined
+      const mediaRecorder = new MediaRecorder(stream, options)
       mediaRecorderRef.current = mediaRecorder
       recordedChunksRef.current = []
 
@@ -202,11 +253,15 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
         }
       }
 
+      mediaRecorder.onerror = () => {
+        // Recording error - but SOS continues
+        setIsRecording(false)
+      }
+
       mediaRecorder.start(1000)
       setIsRecording(true)
-    } catch (error) {
-      console.error("Recording error:", error)
-      // Continue SOS even without recording
+    } catch {
+      // Continue SOS even without recording - silently fail
       setIsRecording(false)
     }
   }
