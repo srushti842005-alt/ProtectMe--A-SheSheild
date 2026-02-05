@@ -49,15 +49,15 @@ export default function MapPage() {
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
           setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude })
-          const incidents = generateNearbyIncidents(position.coords.latitude, position.coords.longitude)
-          setRecentIncidents(incidents.slice(0, 5))
+          const incidents = await generateNearbyIncidents(position.coords.latitude, position.coords.longitude)
+          setRecentIncidents(Array.isArray(incidents) ? incidents.slice(0, 5) : [])
           setLastUpdate(new Date())
         },
-        () => {
-          const incidents = generateNearbyIncidents(12.9716, 77.5946)
-          setRecentIncidents(incidents.slice(0, 5))
+        async () => {
+          const incidents = await generateNearbyIncidents(12.9716, 77.5946)
+          setRecentIncidents(Array.isArray(incidents) ? incidents.slice(0, 5) : [])
         },
       )
     }
@@ -65,9 +65,9 @@ export default function MapPage() {
 
   const refreshIncidents = () => {
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((position) => {
-        const incidents = generateNearbyIncidents(position.coords.latitude, position.coords.longitude)
-        setRecentIncidents(incidents.slice(0, 5))
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const incidents = await generateNearbyIncidents(position.coords.latitude, position.coords.longitude)
+        setRecentIncidents(Array.isArray(incidents) ? incidents.slice(0, 5) : [])
         setLastUpdate(new Date())
       })
     }
