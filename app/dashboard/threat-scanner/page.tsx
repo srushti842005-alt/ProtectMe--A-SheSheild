@@ -6,8 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Camera, CameraOff, Volume2, VolumeX, AlertTriangle, Users, Loader2, FlipHorizontal, Info } from "lucide-react"
 import { cn } from "@/lib/utils"
-import * as cocoSsd from "@tensorflow-models/coco-ssd"
-import "@tensorflow/tfjs"
 
 interface Detection {
   id: string
@@ -18,6 +16,9 @@ interface Detection {
   color: string
   distance: number
 }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyModel = any
 
 export default function ThreatScannerPage() {
   const [cameraActive, setCameraActive] = useState(false)
@@ -34,18 +35,21 @@ export default function ThreatScannerPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const modelRef = useRef<cocoSsd.ObjectDetection | null>(null)
+  const modelRef = useRef<AnyModel>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const animationRef = useRef<number | null>(null)
   const lastAlertTimeRef = useRef<number>(0)
   const isDetectingRef = useRef(false)
 
-  // Load model on mount
+  // Load model on mount - dynamic import to avoid chunk loading errors
   useEffect(() => {
     const loadModel = async () => {
       try {
         setIsLoading(true)
         setModelError(null)
+        // Dynamic imports to avoid Node.js fs module errors in browser
+        await import("@tensorflow/tfjs")
+        const cocoSsd = await import("@tensorflow-models/coco-ssd")
         const model = await cocoSsd.load({ base: "lite_mobilenet_v2" })
         modelRef.current = model
         setModelLoaded(true)
