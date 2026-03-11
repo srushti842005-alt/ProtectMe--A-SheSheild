@@ -372,33 +372,35 @@ export function ContactsProvider({ children }: { children: React.ReactNode }) {
       sessionId = crypto.randomUUID()
     }
 
-    // Send alerts to each contact
-    for (const contact of sosContacts) {
+    // Send alerts to ALL contacts simultaneously (parallel)
+    const sendPromises = sosContacts.map(async (contact, index) => {
       try {
         const phoneClean = contact.phone.replace(/[^0-9]/g, "")
         const whatsappUrl = `https://wa.me/${phoneClean}?text=${encodeURIComponent(message)}`
 
-        sendOfflineSMS(contact.phone, smsMessage)
+        // 1. Send SMS via API (actual SMS delivery if configured)
+        const smsPromise = fetch("/api/send-sms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: contact.phone,
+            message: smsMessage,
+            location,
+          }),
+        }).catch(() => null)
 
-        // Call SMS API (online only)
-        try {
-          await fetch("/api/send-sms", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              phone: contact.phone,
-              message,
-              location,
-            }),
-          })
-        } catch (e) {
-          // Ignore API errors, SMS already sent via native
-        }
+        // 2. Open native SMS app as backup (delayed to not overwhelm)
+        setTimeout(() => {
+          sendOfflineSMS(contact.phone, smsMessage)
+        }, index * 500)
 
-        // Auto-open WhatsApp for first 3 contacts
-        if (sent.length < 3) {
-          window.open(whatsappUrl, "_blank")
-        }
+        // 3. Auto-open WhatsApp for ALL contacts with notifyOnSOS enabled
+        // Stagger opening to prevent popup blocker issues
+        setTimeout(() => {
+          window.open(whatsappUrl, `_blank_${index}`)
+        }, index * 300)
+
+        await smsPromise
 
         // Store alert
         const alerts = JSON.parse(localStorage.getItem("protectme_sos_alerts") || "[]")
@@ -416,11 +418,17 @@ export function ContactsProvider({ children }: { children: React.ReactNode }) {
         })
         localStorage.setItem("protectme_sos_alerts", JSON.stringify(alerts))
 
-        sent.push(contact)
+        return { contact, success: true }
       } catch (error) {
-        failed.push(contact)
+        return { contact, success: false }
       }
-    }
+    })
+
+    const results = await Promise.all(sendPromises)
+    results.forEach((r) => {
+      if (r.success) sent.push(r.contact)
+      else failed.push(r.contact)
+    })
 
     // Set current session
     setCurrentSOSSession({
