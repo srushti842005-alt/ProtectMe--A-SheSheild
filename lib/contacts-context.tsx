@@ -47,6 +47,9 @@ interface ContactsContextType {
 
 const ContactsContext = createContext<ContactsContextType | undefined>(undefined)
 
+// Police Demo Number - Evidence will be sent here automatically
+export const POLICE_DEMO_NUMBER = "+917975859075"
+
 const defaultContacts: Contact[] = [
   {
     id: "1",
@@ -77,6 +80,19 @@ const defaultContacts: Contact[] = [
     notifyOnSOS: true,
     shareLocation: false,
     createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+  },
+  {
+    id: "police-demo",
+    name: "Police Control Room (Demo)",
+    phone: POLICE_DEMO_NUMBER,
+    relationship: "Police Station",
+    isPrimary: false,
+    notifyOnSOS: true,
+    shareLocation: true,
+    createdAt: new Date(),
+    isPoliceStation: true,
+    isEmergencyService: true,
+    distance: "Demo",
   },
 ]
 

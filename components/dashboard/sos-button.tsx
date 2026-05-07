@@ -24,7 +24,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useContacts } from "@/lib/contacts-context"
+import { useContacts, POLICE_DEMO_NUMBER } from "@/lib/contacts-context"
 import { getCurrentLocation } from "@/lib/location-service"
 
 interface SOSButtonProps {
@@ -57,6 +57,8 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
   const [nearbyPoliceAdded, setNearbyPoliceAdded] = useState(false)
   const [sosSessionId, setSOSSessionId] = useState<string | null>(null)
   const [locationUpdateInterval, setLocationUpdateInterval] = useState<NodeJS.Timeout | null>(null)
+  const [evidenceSentToPolice, setEvidenceSentToPolice] = useState(false)
+  const [policeAlertStatus, setPoliceAlertStatus] = useState<"pending" | "sent" | "opened">("pending")
 
   // 911 call conversation
   const [callMessages, setCallMessages] = useState<{ from: "dispatcher" | "user"; text: string }[]>([])
@@ -89,11 +91,18 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
     }
   }, [])
 
-  // Recording timer
+  // Recording timer - sends evidence to police every 30 seconds
   useEffect(() => {
     if (isActive && isRecording) {
       recordingIntervalRef.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1)
+        setRecordingTime((prev) => {
+          const newTime = prev + 1
+          // Send evidence to police every 30 seconds automatically
+          if (newTime > 0 && newTime % 30 === 0 && currentLocation) {
+            sendEvidenceToPolice()
+          }
+          return newTime
+        })
         setEvidenceSent((prev) => Math.min(prev + Math.random() * 5, 100))
       }, 1000)
     } else {
@@ -103,7 +112,7 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
     return () => {
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current)
     }
-  }, [isActive, isRecording])
+  }, [isActive, isRecording, currentLocation])
 
   useEffect(() => {
     if (isActive && typeof navigator !== "undefined") {
@@ -233,8 +242,48 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
     }
   }
 
+  // Send evidence to police automatically
+  const sendEvidenceToPolice = async () => {
+    if (recordedChunksRef.current.length === 0 || !currentLocation) return
+    
+    try {
+      const blob = new Blob(recordedChunksRef.current, { type: "video/webm" })
+      const formData = new FormData()
+      formData.append("evidence", blob, `sos-evidence-${Date.now()}.webm`)
+      formData.append("sessionId", sosSessionId || crypto.randomUUID())
+      formData.append("location", JSON.stringify(currentLocation))
+      formData.append("type", "video")
+      
+      const response = await fetch("/api/send-evidence", {
+        method: "POST",
+        body: formData,
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        setEvidenceSentToPolice(true)
+        setPoliceAlertStatus("sent")
+        
+        // Auto-open WhatsApp to send evidence alert to police
+        if (data.whatsappUrl) {
+          window.open(data.whatsappUrl, "_blank")
+        }
+        
+        // Vibrate to confirm evidence sent
+        if ("vibrate" in navigator) {
+          navigator.vibrate([200, 100, 200])
+        }
+      }
+    } catch (error) {
+      console.error("Failed to send evidence to police:", error)
+    }
+  }
+
   const activateSOS = async () => {
     setIsActive(true)
+    setEvidenceSentToPolice(false)
+    setPoliceAlertStatus("pending")
     onActivate?.()
 
     // Request notification permission
@@ -249,9 +298,19 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
 
     // Try to start recording (but don't block SOS if it fails)
     startRecording()
+    
+    // Send first evidence to police after 10 seconds of recording
+    setTimeout(() => {
+      sendEvidenceToPolice()
+    }, 10000)
   }
 
   const deactivateSOS = async () => {
+    // Send final evidence before deactivating
+    if (recordedChunksRef.current.length > 0) {
+      await sendEvidenceToPolice()
+    }
+    
     stopRecording()
     setIsActive(false)
     setAlertStatuses([])
@@ -259,6 +318,8 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
     setRescueETA(8)
     setEvidenceSent(0)
     setNearbyPoliceAdded(false)
+    setEvidenceSentToPolice(false)
+    setPoliceAlertStatus("pending")
 
     if (locationUpdateInterval) {
       clearInterval(locationUpdateInterval)
@@ -645,10 +706,49 @@ export function SOSButton({ onActivate, onDeactivate }: SOSButtonProps) {
               style={{ width: `${evidenceSent}%` }}
             />
           </div>
-          <p className="text-xs text-muted-foreground mt-1">{Math.round(evidenceSent)}% evidence uploaded</p>
-        </div>
+<p className="text-xs text-muted-foreground mt-1">{Math.round(evidenceSent)}% evidence uploaded</p>
+          </div>
 
-        {/* Alert Status for Each Contact */}
+          {/* Police Evidence Status */}
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+            <h4 className="text-sm font-medium text-foreground flex items-center gap-2 mb-3">
+              <Siren className="w-4 h-4 text-blue-500" />
+              Police Evidence Alert
+            </h4>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-sm text-foreground font-medium">Control Room (Demo)</p>
+                <p className="text-xs text-muted-foreground">{POLICE_DEMO_NUMBER}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {evidenceSentToPolice ? (
+                  <span className="bg-green-500/20 text-green-500 px-3 py-1 rounded-full text-xs flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    Evidence Sent
+                  </span>
+                ) : (
+                  <span className="bg-yellow-500/20 text-yellow-500 px-3 py-1 rounded-full text-xs flex items-center gap-1 animate-pulse">
+                    <Clock className="w-3 h-3" />
+                    Recording...
+                  </span>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Video evidence is being recorded and will be sent automatically to police every 30 seconds.
+            </p>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              className="mt-3 w-full bg-blue-500/10 border-blue-500/30 text-blue-500 hover:bg-blue-500/20"
+              onClick={sendEvidenceToPolice}
+            >
+              <Send className="w-4 h-4 mr-2" />
+              Send Evidence Now
+            </Button>
+          </div>
+
+          {/* Alert Status for Each Contact */}
         <div className="bg-card border border-border rounded-xl p-4">
           <h4 className="text-sm font-medium text-foreground flex items-center gap-2 mb-3">
             <Users className="w-4 h-4 text-emergency" />
